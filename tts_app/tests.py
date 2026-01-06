@@ -2,8 +2,10 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase, Client
-from django.urls import reverse, resolve
+from django.test import Client, TestCase
+from django.urls import resolve, reverse
+
+from tts_app.views import VOICE_CHOICES
 
 
 class IndexViewTests(TestCase):
@@ -29,6 +31,8 @@ class TextToSpeechViewTests(TestCase):
         self.test_text = "Hello, this is a test."
         self.test_api_key = "test_api_key_12345"
         self.mock_audio_data = b"fake_audio_data"
+        self.default_voice = VOICE_CHOICES[0]["id"]
+        self.alt_voice = VOICE_CHOICES[1]["id"]
 
     @patch.dict(os.environ, {"ELEVENLABS_API_KEY": "test_api_key_12345"})
     @patch("tts_app.views.ElevenLabs")
@@ -50,7 +54,7 @@ class TextToSpeechViewTests(TestCase):
         # Verify ElevenLabs was called correctly
         mock_elevenlabs_class.assert_called_once_with(api_key=self.test_api_key)
         mock_client_instance.text_to_speech.convert.assert_called_once_with(
-            voice_id="21m00Tcm4TlvDq8ikWAM",
+            voice_id=self.default_voice,
             model_id="eleven_multilingual_v2",
             text=self.test_text,
             output_format="mp3_44100_128",
@@ -129,6 +133,41 @@ class TextToSpeechViewTests(TestCase):
         mock_client_instance.text_to_speech.convert.assert_called_once()
         call_args = mock_client_instance.text_to_speech.convert.call_args
         self.assertEqual(call_args.kwargs["text"], text_with_whitespace.strip())
+
+    @patch.dict(os.environ, {"ELEVENLABS_API_KEY": "test_api_key_12345"})
+    @patch("tts_app.views.ElevenLabs")
+    def test_text_to_speech_allows_specific_voice(self, mock_elevenlabs_class):
+        """Test selecting a specific voice ID passes through to API."""
+        mock_client_instance = MagicMock()
+        mock_elevenlabs_class.return_value = mock_client_instance
+        mock_client_instance.text_to_speech.convert.return_value = self.mock_audio_data
+
+        response = self.client.post(
+            self.url, {"text": self.test_text, "voice_id": self.alt_voice}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_client_instance.text_to_speech.convert.assert_called_once()
+        call_args = mock_client_instance.text_to_speech.convert.call_args
+        self.assertEqual(call_args.kwargs["voice_id"], self.alt_voice)
+
+    @patch.dict(os.environ, {"ELEVENLABS_API_KEY": "test_api_key_12345"})
+    @patch("tts_app.views.ElevenLabs")
+    def test_text_to_speech_invalid_voice_falls_back_to_default(
+        self, mock_elevenlabs_class
+    ):
+        """Invalid voice_id should fall back to default voice."""
+        mock_client_instance = MagicMock()
+        mock_elevenlabs_class.return_value = mock_client_instance
+        mock_client_instance.text_to_speech.convert.return_value = self.mock_audio_data
+
+        response = self.client.post(
+            self.url, {"text": self.test_text, "voice_id": "invalid_voice"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        call_args = mock_client_instance.text_to_speech.convert.call_args
+        self.assertEqual(call_args.kwargs["voice_id"], self.default_voice)
 
 
 class URLTests(TestCase):
