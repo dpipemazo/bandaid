@@ -1,4 +1,5 @@
 import os
+import unittest
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase, Client
@@ -146,3 +147,28 @@ class URLTests(TestCase):
         self.assertEqual(url, "/api/text-to-speech/")
         resolver = resolve(url)
         self.assertEqual(resolver.func.__name__, "text_to_speech_view")
+
+
+class ElevenLabsIntegrationTests(TestCase):
+    """Integration test that hits the real ElevenLabs API via the Django view."""
+
+    def setUp(self):
+        self.client = Client()
+        self.url = reverse("text_to_speech")
+
+    @unittest.skipUnless(
+        os.getenv("ELEVENLABS_API_KEY"),
+        "ELEVENLABS_API_KEY not set for live integration test",
+    )
+    def test_live_text_to_speech(self):
+        """Call the live API and verify we get audio bytes back."""
+        response = self.client.post(self.url, {"text": "Hello from integration test"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "audio/mpeg")
+        self.assertGreater(len(response.content), 0)
+        # Check common MP3 signatures: ID3 tag or MPEG frame header
+        self.assertTrue(
+            response.content.startswith(b"ID3")
+            or response.content[:2] == b"\xff\xfb",
+            "Response does not look like MP3 audio",
+        )
